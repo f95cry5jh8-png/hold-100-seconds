@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#101719">
+  <title>坚持 100 秒</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: #101719;
+      color: #f4f5ec;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      padding: 24px 16px;
+      background:
+        radial-gradient(ellipse at 50% 0%, #263638 0%, transparent 58%),
+        #101719;
+    }
+    .machine { width: min(100%, 960px); }
+    .topline {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 0 0 12px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 23px;
+      line-height: 1.1;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 5px 0 0;
+      color: #9eaeaa;
+      font-size: 13px;
+    }
+    .record {
+      color: #e8cc69;
+      font-size: 12px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .screen {
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #465957;
+      border-radius: 8px;
+      background: #182324;
+      box-shadow: 0 18px 70px #0008, 0 0 0 5px #1a2425;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      aspect-ratio: 3 / 2;
+      touch-action: none;
+    }
+    .controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+      padding: 16px 2px 0;
+      color: #b3c0bb;
+      font-size: 12px;
+    }
+    .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+    .legend span { display: inline-flex; align-items: center; gap: 7px; }
+    .dot { width: 8px; height: 8px; display: inline-block; border-radius: 2px; }
+    .normal { background: #67c7a0; }
+    .spike { background: #ff786b; }
+    .bounce { background: #e7ca67; }
+    .fragile { background: #a7a5d9; }
+    .keys { color: #d6dfd8; white-space: nowrap; }
+    .touch-controls {
+      display: none;
+      grid-template-columns: 1fr 1fr 1.25fr;
+      gap: 10px;
+      margin-top: 14px;
+      touch-action: none;
+      user-select: none;
+    }
+    .touch-controls button {
+      height: 54px;
+      border: 1px solid #536764;
+      border-radius: 6px;
+      background: #202e2e;
+      color: #f4f5ec;
+      font: inherit;
+      font-size: 20px;
+      font-weight: 750;
+      touch-action: none;
+    }
+    .touch-controls button:active { background: #344745; }
+    .touch-controls .jump {
+      border-color: #e3c45b;
+      background: #d5b64b;
+      color: #18201c;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    @media (pointer: coarse), (max-width: 700px) {
+      body { padding: 18px 12px; align-content: center; }
+      .touch-controls { display: grid; }
+      .controls { align-items: start; flex-direction: column; padding-top: 13px; }
+      .keys { display: none; }
+      .subtitle { font-size: 12px; }
+      h1 { font-size: 20px; }
+    }
+    @media (max-width: 420px) {
+      .legend { gap: 8px 12px; }
+      .record { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="machine">
+    <header class="topline">
+      <div>
+        <h1>坚持 100 秒</h1>
+        <p class="subtitle">平台一直在下坠，别让自己掉出画面。</p>
+      </div>
+      <div class="record" id="record">最佳纪录　00.0 秒</div>
+    </header>
+    <div class="screen">
+      <canvas id="game" aria-label="坚持100秒平台跳跃游戏"></canvas>
+    </div>
+    <nav class="touch-controls" aria-label="触控操作">
+      <button type="button" data-key="left" aria-label="向左">←</button>
+      <button type="button" data-key="right" aria-label="向右">→</button>
+      <button type="button" class="jump" data-key="jump">跳跃</button>
+    </nav>
+    <footer class="controls">
+      <div class="legend">
+        <span><i class="dot normal"></i>普通</span>
+        <span><i class="dot spike"></i>翻转尖刺</span>
+        <span><i class="dot bounce"></i>弹跳</span>
+        <span><i class="dot fragile"></i>易碎</span>
+      </div>
+      <div class="keys">移动 ← → / A D　·　跳跃 Space / ↑ / W</div>
+    </footer>
+  </main>
+  <script>
+    (() => {
+      "use strict";
+      const canvas = document.getElementById("game");
+      const ctx = canvas.getContext("2d");
+      const recordEl = document.getElementById("record");
+      const W = 960, H = 640;
+      const JUMP_VELOCITY = -590;
+      const BOUNCE_VELOCITY = JUMP_VELOCITY;
+      const keys = { left: false, right: false };
+      const COLORS = {
+        ink: "#182324", grid: "#334342", mint: "#67c7a0",
+        coral: "#ff786b", yellow: "#e7ca67", lilac: "#aaa7dd",
+        white: "#f4f5ec", dim: "#a6b5af"
+      };
+      let state = "ready";
+      let elapsed = 0;
+      let lastTime = 0;
+      let shake = 0;
+      let best = Number(localStorage.getItem("hold100-best") || 0);
+      let platforms = [];
+      let particles = [];
+      let player;
+      let stars = [];
+      recordEl.textContent = `最佳纪录　${formatTime(best)}`;
+
+      function formatTime(value) {
+        const seconds = Math.floor(value);
+        const tenths = Math.floor(value * 10 + 0.000001) % 10;
+        return `${String(seconds).padStart(2, "0")}.${tenths} 秒`;
+      }
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        canvas.width = Math.round(rect.width * dpr);
+        canvas.height = Math.round(rect.height * dpr);
+        ctx.setTransform(canvas.width / W, 0, 0, canvas.height / H, 0, 0);
+      }
+      function makePlatform(x, y, type = "normal", width = 112) {
+        const flipDuration = 2.35;
+        return {
+          x, y, w: width, h: 15, type,
+          phase: Math.random() * Math.PI * 2,
+          flip: Math.random() * flipDuration,
+          flipDuration,
+          flipRemaining: flipDuration,
+          spikesUp: true,
+          cracked: false,
+          breakTimer: null,
+          alive: true
+        };
+      }
+      function startGame() {
+        elapsed = 0;
+        shake = 0;
+        particles = [];
+        platforms = [
+          makePlatform(424, 532, "normal", 132),
+          makePlatform(570, 532, "bounce", 100),
+          makePlatform(330, 442, "bounce"),
+          makePlatform(510, 442, "normal", 100),
+          makePlatform(460, 352, "normal"),
+          makePlatform(285, 352, "fragile", 94),
+          makePlatform(350, 262, "spike"),
+          makePlatform(510, 262, "normal", 100),
+          makePlatform(470, 172, "normal", 120),
+          makePlatform(470, 80, "normal", 112)
+        ];
+        player = { x: 474, y: 490, w: 32, h: 42, vx: 0, vy: 0, grounded: true, on: platforms[0], coyote: 0 };
+        state = "playing";
+      }
+      function jump() {
+        if (state !== "playing") { startGame(); return; }
+        if (player.grounded || player.coyote > 0) {
+          player.vy = JUMP_VELOCITY;
+          player.grounded = false;
+          player.on = null;
+          player.coyote = 0;
+          burst(player.x + player.w / 2, player.y + player.h, COLORS.yellow, 7);
+        }
+      }
+      function burst(x, y, color, amount) {
+        for (let i = 0; i < amount; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const speed = 55 + Math.random() * 170;
+          particles.push({ x, y, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed - 35, life: .35 + Math.random() * .35, color, size: 2 + Math.random() * 3 });
+        }
+      }
+      function spawnPlatform() {
+        const alivePlatforms = platforms.filter(platform => platform.alive);
+        const topY = alivePlatforms.length ? Math.min(...alivePlatforms.map(platform => platform.y)) : 0;
+        const topLayer = alivePlatforms.filter(platform => platform.y <= topY + 14);
+        const y = -22;
+        const anchors = topLayer.length ? topLayer.slice(0, 2) : [null];
+        const reliablePlatforms = [];
+        const maxCenterDistance = 155;
+        const occupied = [];
+        const pickReachableX = (anchor, width, platformY) => {
+          const anchorCenter = anchor ? anchor.x + anchor.w / 2 : W / 2;
+          const minX = Math.max(24, anchorCenter - maxCenterDistance - width / 2);
+          const maxX = Math.min(W - width - 24, anchorCenter + maxCenterDistance - width / 2);
+          const isAvailable = x => !occupied.some(platform =>
+            Math.abs(platform.y - platformY) < 18
+            && x < platform.x + platform.w + 12
+            && x + width + 12 > platform.x
+          );
+          for (let attempt = 0; attempt < 40; attempt++) {
+            const x = minX + Math.random() * Math.max(0, maxX - minX);
+            if (isAvailable(x)) return x;
+          }
+          for (let x = minX; x <= maxX; x += 8) {
+            if (isAvailable(x)) return x;
+          }
+          return minX;
+        };
+
+        // Every current route receives a reliable next platform. This keeps
+        // a broken fragile platform from ever being the only way forward.
+        anchors.forEach((anchor, index) => {
+          const type = Math.random() < .58 ? "normal" : "bounce";
+          const width = type === "normal" ? 90 + Math.random() * 48 : 86 + Math.random() * 24;
+          const platform = makePlatform(
+            pickReachableX(anchor, width, y),
+            y + (index ? (Math.random() - .5) * 8 : 0),
+            type,
+            width
+          );
+          platforms.push(platform);
+          occupied.push(platform);
+          reliablePlatforms.push(platform);
+        });
+
+        // Add a special side route often enough to keep the playfield varied,
+        // while preserving the reliable route above.
+        if (Math.random() < .7 && reliablePlatforms.length) {
+          const primary = reliablePlatforms[Math.floor(Math.random() * reliablePlatforms.length)];
+          const alternateRoll = Math.random();
+          const alternateType = alternateRoll < .3 ? "normal"
+            : alternateRoll < .52 ? "bounce"
+            : alternateRoll < .77 ? "spike" : "fragile";
+          const alternateWidth = alternateType === "normal" ? 90 + Math.random() * 42 : 86 + Math.random() * 20;
+          const primaryCenter = primary.x + primary.w / 2;
+          const minSeparation = (primary.w + alternateWidth) / 2 + 16;
+          const separation = minSeparation + Math.random() * 28;
+          const direction = Math.random() < .5 ? -1 : 1;
+          const leftCenter = primaryCenter - separation;
+          const rightCenter = primaryCenter + separation;
+          const leftFits = leftCenter >= alternateWidth / 2 + 24;
+          const rightFits = rightCenter <= W - alternateWidth / 2 - 24;
+          const alternateCenter = leftFits && rightFits
+            ? (direction < 0 ? leftCenter : rightCenter)
+            : leftFits ? leftCenter
+            : rightFits ? rightCenter
+            : Math.max(alternateWidth / 2 + 24, Math.min(W - alternateWidth / 2 - 24, rightCenter));
+          let alternateX = alternateCenter - alternateWidth / 2;
+          const overlaps = platform => Math.abs(platform.y - y) < 18
+            && alternateX < platform.x + platform.w + 12
+            && alternateX + alternateWidth + 12 > platform.x;
+          if (occupied.some(overlaps)) {
+            alternateX = direction < 0
+              ? Math.min(W - alternateWidth - 24, primary.x + primary.w + 18)
+              : Math.max(24, primary.x - alternateWidth - 18);
+          }
+          const alternate = makePlatform(
+            alternateX,
+            y + (Math.random() - .5) * 8,
+            alternateType,
+            alternateWidth
+          );
+          if (!occupied.some(overlaps)) {
+            platforms.push(alternate);
+          }
+        }
+      }
+      function endGame(won) {
+        state = won ? "won" : "lost";
+        if (elapsed > best) {
+          best = elapsed;
+          localStorage.setItem("hold100-best", best);
+          recordEl.textContent = `最佳纪录　${formatTime(best)}`;
+        }
+        if (!won) { shake = .28; burst(player.x + player.w / 2, player.y + player.h / 2, COLORS.coral, 18); }
+      }
+      function update(dt) {
+        if (state !== "playing") return;
+        elapsed += dt;
+        if (elapsed >= 100) { elapsed = 100; endGame(true); return; }
+        const fallSpeed = 26 + Math.min(elapsed * .18, 22);
+        for (const p of platforms) {
+          const oldY = p.y;
+          p.y += fallSpeed * dt;
+          if (p.type === "spike") {
+            p.flip += dt;
+            if (p.flip >= p.flipDuration) {
+              p.flip = 0;
+              p.spikesUp = !p.spikesUp;
+            }
+            p.flipRemaining = Math.max(0, p.flipDuration - p.flip);
+          }
+          if (p.type === "fragile" && p.breakTimer !== null) {
+            p.breakTimer -= dt;
+            p.cracked = p.breakTimer < .48;
+            if (p.breakTimer <= 0) {
+              p.alive = false;
+              burst(p.x + p.w / 2, p.y, COLORS.lilac, 9);
+            }
+          }
+          p.previousY = oldY;
+        }
+        platforms = platforms.filter(p => p.alive && p.y < H + 45);
+        const highestPlatform = platforms.length
+          ? platforms.reduce(
+            (highest, platform) => platform.y < highest.y ? platform : highest,
+            platforms[0]
+          )
+          : null;
+        if (highestPlatform && highestPlatform.y >= 78) spawnPlatform();
+
+        const acceleration = 1850;
+        const target = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+        player.vx += target * acceleration * dt;
+        if (!target) player.vx *= Math.pow(.0008, dt);
+        player.vx = Math.max(-345, Math.min(345, player.vx));
+        player.x += player.vx * dt;
+        if (player.x > W) player.x = -player.w;
+        else if (player.x + player.w < 0) player.x = W;
+
+        const previousBottom = player.y + player.h;
+        if (player.grounded && player.on) {
+          const stillOverPlatform = player.x + player.w - 7 > player.on.x
+            && player.x + 7 < player.on.x + player.on.w;
+          if (player.on.alive && stillOverPlatform) {
+            player.y = player.on.y - player.h;
+            player.vy = fallSpeed;
+            if (player.on.type === "spike" && player.on.spikesUp) {
+              endGame(false);
+            }
+          } else {
+            player.grounded = false;
+            player.on = null;
+          }
+        } else {
+          player.vy += 1550 * dt;
+          player.y += player.vy * dt;
+          player.grounded = false;
+          if (player.vy >= 0) {
+            for (const p of platforms) {
+              const crossed = previousBottom <= p.y + 5 && player.y + player.h >= p.y;
+              const overlaps = player.x + player.w - 7 > p.x && player.x + 7 < p.x + p.w;
+              if (!crossed || !overlaps) continue;
+              // Spike damage is checked only on the landing frame. Once standing,
+              // the platform can flip without causing a second hit.
+              if (p.type === "spike" && p.spikesUp) {
+                endGame(false);
+                break;
+              }
+              player.y = p.y - player.h;
+              player.grounded = true;
+              player.on = p;
+              player.vy = p.type === "bounce" ? BOUNCE_VELOCITY : fallSpeed;
+              if (p.type === "bounce") {
+                player.grounded = false;
+                player.on = null;
+                burst(player.x + player.w / 2, player.y + player.h, COLORS.yellow, 11);
+              }
+              if (p.type === "fragile" && p.breakTimer === null) p.breakTimer = .72;
+              break;
+            }
+          }
+        }
+        if (player.grounded) player.coyote = .1;
+        else player.coyote = Math.max(0, player.coyote - dt);
+        if (player.y < 31 || player.y + player.h > H - 26) endGame(false);
+
+        for (const particle of particles) {
+          particle.life -= dt;
+          particle.x += particle.vx * dt;
+          particle.y += particle.vy * dt;
+          particle.vy += 450 * dt;
+        }
+        particles = particles.filter(p => p.life > 0);
+        shake = Math.max(0, shake - dt);
+      }
+      function roundedRect(x, y, w, h, r, fill, stroke) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, r);
+        if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+        if (stroke) { ctx.strokeStyle = stroke; ctx.stroke(); }
+      }
+      function drawBackground() {
+        ctx.fillStyle = COLORS.ink;
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = "#263433";
+        ctx.lineWidth = 1;
+        for (let x = 24; x < W; x += 48) {
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+        }
+        for (let y = 16; y < H; y += 48) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+        stars.forEach(s => {
+          ctx.globalAlpha = .25 + .3 * Math.sin(elapsed * .8 + s.phase);
+          ctx.fillStyle = s.color;
+          ctx.fillRect(s.x, s.y, s.size, s.size);
+        });
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#e5635e";
+        ctx.fillRect(0, 26, W, 2);
+        ctx.fillRect(0, H - 28, W, 2);
+        ctx.fillStyle = "#ff786b";
+        ctx.font = "700 10px Segoe UI, sans-serif";
+        ctx.fillText("TOP OUT", 17, 19);
+        ctx.fillText("BOTTOM OUT", 17, H - 10);
+      }
+      function drawPlatform(p) {
+        const colors = { normal: COLORS.mint, spike: COLORS.coral, bounce: COLORS.yellow, fragile: COLORS.lilac };
+        const color = colors[p.type];
+        ctx.save();
+        if (p.type === "fragile" && p.cracked) ctx.translate(Math.sin(elapsed * 80) * 2, 0);
+        roundedRect(p.x, p.y + 4, p.w, p.h, 4, "#0b1112");
+        roundedRect(p.x, p.y, p.w, p.h, 4, color);
+        ctx.fillStyle = "#f7f3db";
+        ctx.globalAlpha = .42;
+        roundedRect(p.x + 5, p.y + 2, Math.max(12, p.w - 10), 3, 2, "#ffffff");
+        ctx.globalAlpha = 1;
+        if (p.type === "spike") {
+          const up = p.spikesUp;
+          ctx.fillStyle = "#ffd2c7";
+          const edgeY = up ? p.y : p.y + p.h;
+          const tipY = edgeY + (up ? -13 : 13);
+          for (let x = p.x + 7; x + 16 <= p.x + p.w - 5; x += 18) {
+            ctx.beginPath();
+            ctx.moveTo(x, edgeY);
+            ctx.lineTo(x + 8, tipY);
+            ctx.lineTo(x + 16, edgeY);
+            ctx.closePath();
+            ctx.fill();
+          }
+          const label = `${up ? "危险" : "安全"} · ${p.flipRemaining.toFixed(1)}s`;
+          ctx.font = "700 10px Segoe UI, Microsoft YaHei, sans-serif";
+          const labelWidth = ctx.measureText(label).width + 14;
+          const labelY = p.y > 76 ? p.y - 21 : p.y + p.h + 25;
+          roundedRect(p.x + p.w / 2 - labelWidth / 2, labelY - 12, labelWidth, 16, 4, "#111a1add", up ? "#ff786b" : "#67c7a0");
+          ctx.fillStyle = up ? "#ffb1a6" : "#a8ead0";
+          ctx.textAlign = "center";
+          ctx.fillText(label, p.x + p.w / 2, labelY);
+          ctx.textAlign = "left";
+        } else if (p.type === "bounce") {
+          const bouncePulse = (Math.sin(elapsed * 8 + p.phase) + 1) / 2;
+          ctx.strokeStyle = "#8b742b";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          const springY = p.y + 10 - bouncePulse * 4;
+          ctx.moveTo(p.x + 13, p.y + 12);
+          ctx.lineTo(p.x + 20, springY);
+          ctx.lineTo(p.x + 27, p.y + 12);
+          ctx.lineTo(p.x + 34, springY);
+          ctx.lineTo(p.x + 41, p.y + 12);
+          ctx.stroke();
+          ctx.strokeStyle = "#fff2ad";
+          ctx.globalAlpha = .45 + bouncePulse * .45;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(p.x + p.w / 2, p.y - 7 - bouncePulse * 5);
+          ctx.lineTo(p.x + p.w / 2, p.y - 1);
+          ctx.moveTo(p.x + p.w / 2 - 4, p.y - 5 - bouncePulse * 5);
+          ctx.lineTo(p.x + p.w / 2, p.y - 1);
+          ctx.lineTo(p.x + p.w / 2 + 4, p.y - 5 - bouncePulse * 5);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        } else if (p.type === "fragile" && p.cracked) {
+          ctx.strokeStyle = "#55517f";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(p.x + p.w * .55, p.y + 2);
+          ctx.lineTo(p.x + p.w * .46, p.y + 8);
+          ctx.lineTo(p.x + p.w * .58, p.y + 11);
+          ctx.stroke();
+        }
+        ctx.restore();
+      }
+      function drawPlayer() {
+        if (!player) return;
+        const x = player.x, y = player.y;
+        ctx.save();
+        ctx.fillStyle = "#0d1414";
+        roundedRect(x + 2, y + 3, player.w, player.h, 9, "#0d1414");
+        roundedRect(x, y, player.w, player.h, 9, "#f2eee1");
+        roundedRect(x + 4, y + 6, player.w - 8, 13, 5, COLORS.mint);
+        ctx.fillStyle = "#263433";
+        const lookOffset = player.vx < -30 ? -3 : player.vx > 30 ? 3 : 0;
+        ctx.fillRect(x + 8 + lookOffset, y + 10, 4, 5);
+        ctx.fillRect(x + 19 + lookOffset, y + 10, 4, 5);
+        ctx.fillStyle = "#d6d0bf";
+        ctx.fillRect(x + 6, y + 25, 7, 3);
+        ctx.fillRect(x + 19, y + 25, 7, 3);
+        ctx.restore();
+      }
+      function drawHUD() {
+        roundedRect(W / 2 - 108, 39, 216, 50, 8, "#111a1a", "#40514e");
+        ctx.textAlign = "center";
+        ctx.fillStyle = COLORS.dim;
+        ctx.font = "700 10px Segoe UI, sans-serif";
+        ctx.fillText("存活时间", W / 2, 55);
+        ctx.fillStyle = COLORS.white;
+        ctx.font = "800 24px Segoe UI, sans-serif";
+        ctx.fillText(formatTime(elapsed).replace(" 秒", ""), W / 2, 79);
+        ctx.textAlign = "left";
+        roundedRect(W - 174, 47, 142, 8, 4, "#364543");
+        roundedRect(W - 174, 47, 142 * Math.max(0, 1 - elapsed / 100), 8, 4, elapsed > 75 ? COLORS.coral : COLORS.mint);
+        ctx.fillStyle = COLORS.dim;
+        ctx.font = "700 10px Segoe UI, sans-serif";
+        ctx.fillText("100 秒", W - 174, 70);
+      }
+      function drawOverlay(title, subtitle, button, accent) {
+        ctx.fillStyle = "#0b1111d9";
+        ctx.fillRect(0, 0, W, H);
+        roundedRect(W / 2 - 228, H / 2 - 116, 456, 232, 12, "#1a2727", "#536460");
+        ctx.fillStyle = accent;
+        ctx.fillRect(W / 2 - 228, H / 2 - 116, 6, 232);
+        ctx.textAlign = "center";
+        ctx.fillStyle = COLORS.white;
+        ctx.font = "800 39px Segoe UI, Microsoft YaHei, sans-serif";
+        ctx.fillText(title, W / 2, H / 2 - 36);
+        ctx.fillStyle = "#b6c3bd";
+        ctx.font = "15px Segoe UI, Microsoft YaHei, sans-serif";
+        ctx.fillText(subtitle, W / 2, H / 2 + 1);
+        roundedRect(W / 2 - 98, H / 2 + 31, 196, 46, 7, accent);
+        ctx.fillStyle = "#18201c";
+        ctx.font = "800 16px Segoe UI, Microsoft YaHei, sans-serif";
+        ctx.fillText(button, W / 2, H / 2 + 60);
+        ctx.fillStyle = "#8f9f99";
+        ctx.font = "12px Segoe UI, Microsoft YaHei, sans-serif";
+        ctx.fillText("按 Space / ↑ 或点击画面开始", W / 2, H / 2 + 101);
+        ctx.textAlign = "left";
+      }
+      function render() {
+        ctx.save();
+        if (shake > 0) ctx.translate((Math.random() - .5) * 12 * shake / .28, (Math.random() - .5) * 9 * shake / .28);
+        drawBackground();
+        platforms.forEach(drawPlatform);
+        particles.forEach(p => {
+          ctx.globalAlpha = Math.max(0, Math.min(1, p.life * 2.5));
+          ctx.fillStyle = p.color;
+          ctx.fillRect(p.x, p.y, p.size, p.size);
+        });
+        ctx.globalAlpha = 1;
+        drawPlayer();
+        drawHUD();
+        ctx.restore();
+        if (state === "ready") drawOverlay("坚持 100 秒", "平台不断下坠，翻面尖刺、弹跳板和脆弱板都在等你。", "开始挑战", COLORS.yellow);
+        if (state === "lost") drawOverlay("挑战结束", `你坚持了 ${formatTime(elapsed)}，再试一次吧。`, "重新开始", COLORS.coral);
+        if (state === "won") drawOverlay("你赢了！", "整整 100 秒，漂亮地活下来了。", "再玩一次", COLORS.mint);
+      }
+      function frame(now) {
+        const dt = Math.min((now - lastTime) / 1000 || 0, .032);
+        lastTime = now;
+        update(dt);
+        render();
+        requestAnimationFrame(frame);
+      }
+      function keyDown(event) {
+        const key = event.key.toLowerCase();
+        if (["arrowleft", "arrowright", "arrowup", " ", "a", "d", "w"].includes(key)) event.preventDefault();
+        if (key === "arrowleft" || key === "a") keys.left = true;
+        if (key === "arrowright" || key === "d") keys.right = true;
+        if (["arrowup", "w", " "].includes(key) && !event.repeat) jump();
+      }
+      function keyUp(event) {
+        const key = event.key.toLowerCase();
+        if (key === "arrowleft" || key === "a") keys.left = false;
+        if (key === "arrowright" || key === "d") keys.right = false;
+      }
+      window.addEventListener("keydown", keyDown);
+      window.addEventListener("keyup", keyUp);
+      window.addEventListener("blur", () => { keys.left = false; keys.right = false; });
+      canvas.addEventListener("pointerdown", () => {
+        if (state !== "playing") startGame();
+        else jump();
+      });
+      for (const button of document.querySelectorAll("[data-key]")) {
+        const key = button.dataset.key;
+        const release = event => { event.preventDefault(); if (key !== "jump") keys[key] = false; };
+        button.addEventListener("pointerdown", event => {
+          event.preventDefault();
+          if (key === "jump") jump();
+          else { keys[key] = true; button.setPointerCapture(event.pointerId); }
+        });
+        button.addEventListener("pointerup", release);
+        button.addEventListener("pointercancel", release);
+        button.addEventListener("lostpointercapture", release);
+      }
+      stars = Array.from({ length: 58 }, () => ({
+        x: Math.random() * W, y: Math.random() * H, size: Math.random() > .82 ? 3 : 2,
+        phase: Math.random() * 8, color: Math.random() > .5 ? COLORS.yellow : COLORS.mint
+      }));
+      window.addEventListener("resize", resize);
+      resize();
+      requestAnimationFrame(frame);
+    })();
+  </script>
+</body>
+</html>
